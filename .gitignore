@@ -1,0 +1,26 @@
+# Environment / secrets
+.env
+
+# Pipeline runtime files
+*.db
+*.db-shm
+*.db-wal
+*.log
+*.pid
+progress.json
+manifest.json
+upload_manifest.json
+UPLOAD_SUMMARY.md
+upload_to_gphotos.sh
+rclone_upload.log
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# GeoNames data (large, download separately)
+allCountries.txt
+allCountries.zip

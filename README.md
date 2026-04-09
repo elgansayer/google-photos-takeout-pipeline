@@ -23,11 +23,16 @@ A 9-phase pipeline to process Google Takeout photo exports into a clean, dedupli
 |------|---------|
 | Python 3.10+ | Pipeline scripts |
 | [Ollama](https://ollama.com) | Local AI inference |
-| SQLite 3 | Pipeline database |
+| SQLite 3 | Pipeline database (usually pre-installed) |
+| exiftool | EXIF metadata reading/writing (Phase 2) |
 | [rclone](https://rclone.org) | Google Photos upload (Phase 9 only) |
 
 ```bash
 pip install -r requirements.txt
+
+# Install exiftool
+sudo apt install exiftool        # Ubuntu/Debian
+brew install exiftool            # macOS
 ```
 
 ### Ollama models

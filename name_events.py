@@ -15,6 +15,7 @@ Run: python3 name_events.py [--dry-run]
 
 import json
 import logging
+import os
 import re
 import sqlite3
 from collections import Counter

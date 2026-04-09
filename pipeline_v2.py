@@ -54,13 +54,13 @@ PIPELINE_DB   = PIPELINE_DIR / "pipeline_v2.db"
 GEONAMES_FILE = Path(os.environ.get("GEONAMES_FILE", str(PIPELINE_DIR / "allCountries.txt")))
 FINAL_DIR     = Path(os.environ.get("FINAL_DIR",     ""))   # Required: output directory
 
-# DigiKam DBs (both are same data, use internal which was enriched)
-DIGIKAM_DB = SECONDARY_DIR / "digikam4.db"
-SIMILARITY_DB = SECONDARY_DIR / "similarity.db"
+# DigiKam DBs (optional, only used when SECONDARY_DIR is set)
+DIGIKAM_DB    = SECONDARY_DIR / "digikam4.db"    if SECONDARY_DIR.name else None
+SIMILARITY_DB = SECONDARY_DIR / "similarity.db"  if SECONDARY_DIR.name else None
 
-OLLAMA_HOST = "http://localhost:11434"
-VISION_MODEL = "llama3.2-vision:latest"
-TEXT_MODEL = "gemma3:4b"
+OLLAMA_HOST  = os.environ.get("OLLAMA_HOST",  "http://localhost:11434")
+VISION_MODEL = os.environ.get("VISION_MODEL", "llama3.2-vision:latest")
+TEXT_MODEL   = os.environ.get("TEXT_MODEL",   "gemma3:4b")
 
 IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.gif', '.heic', '.webp', '.bmp',
                     '.tiff', '.tif', '.arw', '.dng', '.cr2', '.nef', '.orf', '.rw2'}
@@ -133,6 +133,8 @@ def init_db():
             ai_scene_type TEXT,
             ai_activity TEXT,
             ai_indoor_outdoor TEXT,
+            ai_is_holiday INTEGER DEFAULT 0,
+            ai_holiday_type TEXT,
             ai_processed INTEGER DEFAULT 0,
             -- Album
             album_name TEXT,
@@ -293,7 +295,10 @@ def phase1_audit(dry_run=False):
     # Step 4: Match JSON sidecars (the big win — 89K on external)
     log.info("Step 4: Matching JSON sidecars...")
     json_matched = 0
-    for source_dir, source_label in [(PRIMARY_DIR, 'primary'), (SECONDARY_DIR, 'secondary')]:
+    sources = [(PRIMARY_DIR, 'primary')]
+    if SECONDARY_DIR.name and SECONDARY_DIR.is_dir():
+        sources.append((SECONDARY_DIR, 'secondary'))
+    for source_dir, source_label in sources:
         for root, dirs, files in os.walk(str(source_dir)):
             json_files = [f for f in files if f.endswith('.json') and f != 'metadata.json'
                          and 'print-subscriptions' not in f and 'shared_album_comments' not in f
@@ -993,34 +998,51 @@ def phase6_ai_classify(dry_run=False, max_items=None):
                 "model": VISION_MODEL, "prompt": prompt, "images": [img_b64],
                 "stream": False, "options": {"temperature": 0.1, "num_predict": 300}
             }, timeout=120)
+            resp.raise_for_status()
             ai_data = _parse_json_response(resp.json().get('response', ''))
             return (row['id'], ai_data, False)
-        except Exception:
-            return (row['id'], None, False)
+        except Exception as e:
+            log.debug(f"classify_one failed for {fpath}: {e}")
+            return (row['id'], None, False, True)  # 4th element = transient error
 
     total = len(rows)
     with ThreadPoolExecutor(max_workers=WORKERS) as executor:
         futures = {executor.submit(classify_one, row): row for row in rows}
         for future in as_completed(futures):
             try:
-                photo_id, ai_data, missing = future.result()
-            except Exception:
+                result = future.result()
+                photo_id, ai_data, missing = result[0], result[1], result[2]
+                transient_error = result[3] if len(result) > 3 else False
+            except Exception as e:
+                log.warning(f"Unexpected future error: {e}")
                 with counter_lock:
                     errors += 1
                 continue
 
             with db_lock:
                 if missing:
+                    # File not found — mark permanently skipped
                     cursor.execute("UPDATE photos SET ai_processed = -1 WHERE id = ?", (photo_id,))
+                elif transient_error:
+                    # Network/ollama error — leave ai_processed=0 so it can be retried
+                    with counter_lock:
+                        errors += 1
+                    continue
                 elif ai_data:
                     cursor.execute("""
                         UPDATE photos SET ai_description=?, ai_tags=?, ai_scene_type=?,
-                            ai_activity=?, ai_indoor_outdoor=?, ai_processed=1
+                            ai_activity=?, ai_indoor_outdoor=?,
+                            ai_is_holiday=?, ai_holiday_type=?,
+                            ai_processed=1
                         WHERE id=?
                     """, (ai_data.get('scene',''), json.dumps(ai_data.get('tags',[])),
                           ai_data.get('type',''), ai_data.get('activity',''),
-                          ai_data.get('indoor_outdoor',''), photo_id))
+                          ai_data.get('indoor_outdoor',''),
+                          1 if ai_data.get('is_holiday') else 0,
+                          ai_data.get('holiday_type',''),
+                          photo_id))
                 else:
+                    # Parsed but empty response — mark done to avoid infinite retry
                     cursor.execute("UPDATE photos SET ai_processed=1 WHERE id=?", (photo_id,))
                     with counter_lock:
                         errors += 1
@@ -1070,7 +1092,8 @@ def phase7_group_albums(dry_run=False):
     # Step 1: Import existing Google albums (from metadata.json in dirs)
     log.info("Importing existing Google albums...")
     existing = 0
-    for source_dir in [PRIMARY_DIR, SECONDARY_DIR]:
+    scan_dirs = [d for d in [PRIMARY_DIR, SECONDARY_DIR] if d.name and d.is_dir()]
+    for source_dir in scan_dirs:
         for entry in os.listdir(str(source_dir)):
             meta_file = source_dir / entry / 'metadata.json'
             if not meta_file.exists():
@@ -1434,6 +1457,20 @@ def main():
     parser.add_argument('--dry-run', action='store_true')
     parser.add_argument('--max-items', type=int, default=None)
     args = parser.parse_args()
+
+    # Validate required configuration
+    errors = []
+    if not PRIMARY_DIR.name:
+        errors.append("PRIMARY_DIR is not set (set via environment variable or .env file)")
+    elif not PRIMARY_DIR.is_dir():
+        errors.append(f"PRIMARY_DIR does not exist: {PRIMARY_DIR}")
+    if not FINAL_DIR.name:
+        errors.append("FINAL_DIR is not set (set via environment variable or .env file)")
+    if errors:
+        for e in errors:
+            log.error(f"Configuration error: {e}")
+        log.error("See .env.example for setup instructions.")
+        sys.exit(1)
 
     PIPELINE_DIR.mkdir(parents=True, exist_ok=True)
 

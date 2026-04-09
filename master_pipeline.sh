@@ -360,7 +360,7 @@ main() {
 
     run_phase 2 run_date_fix
     run_phase 7 regroup_albums
-    run_phase 8 rename_events
+    run_phase 7 rename_events
     run_phase 8 organize_to_immich
     run_phase 9 upload_prep
 

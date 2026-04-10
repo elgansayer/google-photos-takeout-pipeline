@@ -55,11 +55,11 @@ log "Pipeline started. FROM=${FROM_PHASE} DRY_RUN=${DRY_RUN:-none}"
 
 # Phase 1
 run_phase 1 "Unified audit of both directories" \
-    $PYTHON3 pipeline_v2.py --phase 1 $DRY_RUN
+    $PYTHON3 pipeline.py --step 1 $DRY_RUN
 
 # Phase 2 - merge JSON sidecars
 run_phase 2 "Merge JSON sidecars into EXIF" \
-    $PYTHON3 pipeline_v2.py --phase 2 $DRY_RUN
+    $PYTHON3 pipeline.py --step 2 $DRY_RUN
 
 # Phase 2.5 - fix bad dates
 run_phase 2.5 "Fix wrong/missing dates" \
@@ -67,22 +67,22 @@ run_phase 2.5 "Fix wrong/missing dates" \
 
 # Phase 3 - deduplicate
 run_phase 3 "Deduplicate" \
-    $PYTHON3 pipeline_v2.py --phase 3 $DRY_RUN
+    $PYTHON3 pipeline.py --step 3 $DRY_RUN
 
 # Phase 4 - fix broken dir names
 run_phase 4 "Fix broken directory names" \
-    $PYTHON3 pipeline_v2.py --phase 4 $DRY_RUN
+    $PYTHON3 pipeline.py --step 4 $DRY_RUN
 
 # Phase 5 - geocode
 run_phase 5 "Reverse geocode (offline GeoNames)" \
-    $PYTHON3 pipeline_v2.py --phase 5 $DRY_RUN
+    $PYTHON3 pipeline.py --step 5 $DRY_RUN
 
 # Phase 6 - AI classification in background, don't block
 if should_run 6 && [[ -z "$DRY_RUN" ]]; then
     log ""; log "══════════════════════════════════════════════"
     log "PHASE 6: AI Classification (background, ~80h)"
     log "══════════════════════════════════════════════"
-    $PYTHON3 pipeline_v2.py --phase 6 >> "$PIPELINE_DIR/ai_classify.log" 2>&1 &
+    $PYTHON3 pipeline.py --step 6 >> "$PIPELINE_DIR/ai_classify.log" 2>&1 &
     AI_PID=$!
     log "AI started PID=$AI_PID. Monitor: tail -f $PIPELINE_DIR/ai_classify.log"
     log "Waiting 5 min before clustering..."
@@ -91,7 +91,7 @@ fi
 
 # Phase 7 - cluster into albums
 run_phase 7 "Auto-group into holiday/event albums" \
-    $PYTHON3 pipeline_v2.py --phase 7 $DRY_RUN
+    $PYTHON3 pipeline.py --step 7 $DRY_RUN
 
 # Phase 7.5 - AI event naming
 run_phase 7.5 "Rename albums to event names (AI)" \
@@ -99,11 +99,11 @@ run_phase 7.5 "Rename albums to event names (AI)" \
 
 # Phase 8 - organize
 run_phase 8 "Organize into final directory" \
-    $PYTHON3 pipeline_v2.py --phase 8 $DRY_RUN
+    $PYTHON3 pipeline.py --step 8 $DRY_RUN
 
 # Phase 9 - upload prep
 run_phase 9 "Upload prep + Google Photos scripts" \
-    $PYTHON3 pipeline_v2.py --phase 9 $DRY_RUN
+    $PYTHON3 pipeline.py --step 9 $DRY_RUN
 
 run_phase 9 "Generate Google Photos rclone scripts" \
     $PYTHON3 google_photos_upload.py --generate-scripts

@@ -43,7 +43,7 @@ logging.basicConfig(
 log = logging.getLogger('fix_dates')
 
 PIPELINE_DIR = Path(os.environ.get("PIPELINE_DIR", str(Path(__file__).parent)))
-PIPELINE_DB  = PIPELINE_DIR / 'pipeline_v2.db'
+PIPELINE_DB  = PIPELINE_DIR / 'photos.db'
 OLLAMA_HOST = 'http://localhost:11434'
 VISION_MODEL = 'llama3.2-vision:latest'
 

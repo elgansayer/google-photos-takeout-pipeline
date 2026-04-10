@@ -18,7 +18,7 @@ IMMICH_MOUNT="${IMMICH_MOUNT:-}"
 OLD_FINAL_DIR="${OLD_FINAL_DIR:-}"
 
 PIPELINE_DIR="${PIPELINE_DIR}"
-DB="$PIPELINE_DIR/pipeline_v2.db"
+DB="$PIPELINE_DIR/photos.db"
 LOG="$PIPELINE_DIR/orchestrator.log"
 PID_FILE="$PIPELINE_DIR/ai_classify.pid"
 CHECK_INTERVAL=300  # check every 5 minutes
@@ -47,7 +47,7 @@ while true; do
 
     if [ "$REMAINING" -gt 0 ] 2>/dev/null; then
         log "AI classify stopped with $REMAINING remaining — restarting..."
-        nohup python3 "$PIPELINE_DIR/pipeline_v2.py" --phase 6 >> "$PIPELINE_DIR/ai_classify.log" 2>&1 &
+        nohup python3 "$PIPELINE_DIR/pipeline.py" --step 6 >> "$PIPELINE_DIR/ai_classify.log" 2>&1 &
         echo $! > "$PID_FILE"
         log "Restarted AI classify PID $(cat $PID_FILE)"
         sleep 30

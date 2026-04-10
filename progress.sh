@@ -23,7 +23,7 @@ IMMICH_MOUNT="${IMMICH_MOUNT:-}"
 OLD_FINAL_DIR="${OLD_FINAL_DIR:-}"
 
 PIPELINE_DIR="${PIPELINE_DIR}"
-DB="$PIPELINE_DIR/pipeline_v2.db"
+DB="$PIPELINE_DIR/photos.db"
 FINAL_DIR="${FINAL_DIR}"
 OLD_FINAL="${OLD_FINAL_DIR}"
 AI_LOG="$PIPELINE_DIR/ai_classify.log"
@@ -175,13 +175,13 @@ check_phase() {
     fi
 }
 
-check_phase "Phase 1    Audit both dirs"       "$PIPELINE_DIR/pipeline_v2.log" "Phase 1\|Catalogued"
-check_phase "Phase 2    Merge JSON sidecars"   "$PIPELINE_DIR/pipeline_v2.log" "Phase 2 complete"
+check_phase "Phase 1    Audit both dirs"       "$PIPELINE_DIR/pipeline.log" "Phase 1\|Catalogued"
+check_phase "Phase 2    Merge JSON sidecars"   "$PIPELINE_DIR/pipeline.log" "Phase 2 complete"
 check_phase "Phase 2.5  Fix dates"             "$PIPELINE_DIR/orchestrator.log" "Phase 2.5 complete"
 check_phase "Phase 2.5b Neighbor date fix"     "$PIPELINE_DIR/neighbor_date_fix.log" "Total dates fixed"
-check_phase "Phase 3    Deduplicate"           "$PIPELINE_DIR/pipeline_v2.log" "Phase 3 complete"
-check_phase "Phase 4    Fix dir names"         "$PIPELINE_DIR/pipeline_v2.log" "Phase 4 complete"
-check_phase "Phase 5    Geocode"               "$PIPELINE_DIR/pipeline_v2.log" "Phase 5 complete"
+check_phase "Phase 3    Deduplicate"           "$PIPELINE_DIR/pipeline.log" "Phase 3 complete"
+check_phase "Phase 4    Fix dir names"         "$PIPELINE_DIR/pipeline.log" "Phase 4 complete"
+check_phase "Phase 5    Geocode"               "$PIPELINE_DIR/pipeline.log" "Phase 5 complete"
 if [[ "${AI_DONE:-0}" -ge "${TOTAL_IMGS:-1}" ]]; then
     echo -e "  ${G}✓${N} Phase 6    AI classify (${AI_DONE}/${TOTAL_IMGS})"
 else

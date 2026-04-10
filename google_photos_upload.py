@@ -33,7 +33,7 @@ logging.basicConfig(
 log = logging.getLogger('upload')
 
 PIPELINE_DIR    = Path(os.environ.get("PIPELINE_DIR", str(Path(__file__).parent)))
-PIPELINE_DB     = PIPELINE_DIR / 'pipeline_v2.db'
+PIPELINE_DB     = PIPELINE_DIR / 'photos.db'
 FINAL_DIR       = Path(os.environ.get("FINAL_DIR", ""))
 UPLOAD_MANIFEST = PIPELINE_DIR / 'upload_manifest.json'
 

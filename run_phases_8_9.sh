@@ -23,12 +23,12 @@ if [[ -d "$FINAL_DIR" ]]; then
 fi
 mkdir -p "$FINAL_DIR"
 
-python3 "$PIPELINE_DIR/pipeline_v2.py" --phase 8 >> "$PIPELINE_DIR/phase8.log" 2>&1
+python3 "$PIPELINE_DIR/pipeline.py" --step 8 >> "$PIPELINE_DIR/phase8.log" 2>&1
 log "Phase 8 complete!"
 
 # Upload prep
 log "=== Phase 9: Upload Prep ==="
-python3 "$PIPELINE_DIR/pipeline_v2.py" --phase 9 >> "$PIPELINE_DIR/phase9.log" 2>&1 || true
+python3 "$PIPELINE_DIR/pipeline.py" --step 9 >> "$PIPELINE_DIR/phase9.log" 2>&1 || true
 python3 "$PIPELINE_DIR/google_photos_upload.py" >> "$PIPELINE_DIR/upload.log" 2>&1 || true
 log "Phase 9 complete!"
 

@@ -7,7 +7,7 @@ LOGFILE="$PIPELINE_DIR/orchestrator.log"
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" | tee -a "$LOGFILE"; }
 
 # Poll until Phase 2 process is gone
-PHASE2_PID=$(pgrep -f "pipeline_v2.py --phase 2" | head -1)
+PHASE2_PID=$(pgrep -f "pipeline.py --step 2" | head -1)
 if [[ -n "$PHASE2_PID" ]]; then
     log "Polling for Phase 2 (PID $PHASE2_PID) to complete..."
     while kill -0 "$PHASE2_PID" 2>/dev/null; do
@@ -16,7 +16,7 @@ if [[ -n "$PHASE2_PID" ]]; then
     log "Phase 2 process ended, checking result..."
     MERGED=$(python3 -c "
 import sqlite3
-conn = sqlite3.connect('$PIPELINE_DIR/pipeline_v2.db', timeout=30)
+conn = sqlite3.connect('$PIPELINE_DIR/photos.db', timeout=30)
 n = conn.execute('SELECT COUNT(*) FROM photos WHERE json_merged=1').fetchone()[0]
 print(n)
 conn.close()

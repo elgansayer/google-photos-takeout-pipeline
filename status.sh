@@ -1,6 +1,6 @@
 #!/bin/bash
 # Pipeline status dashboard
-DB="${PIPELINE_DIR}/pipeline_v2.db"
+DB="${PIPELINE_DIR}/photos.db"
 PIPELINE_DIR="${PIPELINE_DIR}"
 
 echo "╔══════════════════════════════════════════════════════════════╗"
@@ -119,15 +119,15 @@ if manifest: completed.add("9")
 running = set()
 import subprocess
 try:
-    out = subprocess.check_output(['pgrep', '-fa', 'pipeline_v2|fix_dates|name_events'], text=True)
+    out = subprocess.check_output(['pgrep', '-fa', 'pipeline.py|fix_dates|name_events'], text=True)
     for line in out.splitlines():
-        for p in ["--phase 2", "--phase 3", "--phase 4", "--phase 5", "--phase 6",
-                  "--phase 7", "--phase 8", "--phase 9", "fix_dates", "name_events"]:
+        for p in ["--step 2", "--step 3", "--step 4", "--step 5", "--step 6",
+                  "--step 7", "--step 8", "--step 9", "fix_dates", "name_events"]:
             if p in line:
                 if "fix_dates" in line: running.add("2.5")
                 elif "name_events" in line: running.add("7.5")
                 else:
-                    m = re.search(r'--phase (\d+)', line)
+                    m = re.search(r'--step (\S+)', line)
                     if m: running.add(m.group(1))
 except: pass
 
@@ -150,7 +150,7 @@ echo ""
 
 # Running processes
 echo "── RUNNING PROCESSES ─────────────────────────────────────────"
-PROCS=$(pgrep -fa "pipeline_v2|fix_dates|name_events|continue_after" 2>/dev/null)
+PROCS=$(pgrep -fa "pipeline.py|fix_dates|name_events|continue_after" 2>/dev/null)
 if [[ -z "$PROCS" ]]; then
     echo "  (no pipeline processes running)"
 else

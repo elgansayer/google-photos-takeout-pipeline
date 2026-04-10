@@ -29,7 +29,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 PIPELINE_DIR = Path(os.environ.get("PIPELINE_DIR", str(Path(__file__).parent)))
-PIPELINE_DB  = PIPELINE_DIR / 'pipeline_v2.db'
+PIPELINE_DB  = PIPELINE_DIR / 'photos.db'
 LOG_FILE     = PIPELINE_DIR / 'neighbor_date_fix.log'
 
 logging.basicConfig(

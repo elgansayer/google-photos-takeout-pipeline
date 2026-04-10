@@ -20,7 +20,7 @@ OLD_FINAL_DIR="${OLD_FINAL_DIR:-}"
 
 PIPELINE_DIR="${PIPELINE_DIR}"
 FINAL_DIR="${FINAL_DIR}"
-DB="$PIPELINE_DIR/pipeline_v2.db"
+DB="$PIPELINE_DIR/photos.db"
 LOG="$PIPELINE_DIR/orchestrator.log"
 
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" | tee -a "$LOG"; }
@@ -35,7 +35,7 @@ log "AI classify: $AI_DONE/$TOTAL classified"
 log "Clearing auto albums for re-clustering..."
 python3 - <<'PYEOF'
 import sqlite3, time
-db = "${PIPELINE_DIR}/pipeline_v2.db"
+db = "${PIPELINE_DIR}/photos.db"
 for attempt in range(30):
     try:
         conn = sqlite3.connect(db, timeout=120)
@@ -52,7 +52,7 @@ for attempt in range(30):
 PYEOF
 
 log "Re-running Phase 7 (album grouping with full AI data)..."
-python3 "$PIPELINE_DIR/pipeline_v2.py" --phase 7 >> "$PIPELINE_DIR/phase7_post_ai.log" 2>&1
+python3 "$PIPELINE_DIR/pipeline.py" --step 7 >> "$PIPELINE_DIR/phase7_post_ai.log" 2>&1
 
 ALBUM_COUNT=$(sqlite3 "$DB" "SELECT COUNT(*) FROM albums;" 2>/dev/null)
 log "Phase 7 complete: $ALBUM_COUNT albums"
@@ -61,13 +61,13 @@ log "Re-running Phase 7.5 (AI event naming with full descriptions)..."
 python3 "$PIPELINE_DIR/name_events.py" >> "$PIPELINE_DIR/name_events_post_ai.log" 2>&1
 
 log "Re-running Phase 8 (organize to $FINAL_DIR with event-based folders)..."
-python3 "$PIPELINE_DIR/pipeline_v2.py" --phase 8 >> "$PIPELINE_DIR/phase8_post_ai.log" 2>&1
+python3 "$PIPELINE_DIR/pipeline.py" --step 8 >> "$PIPELINE_DIR/phase8_post_ai.log" 2>&1
 
 FILE_COUNT=$(find "$FINAL_DIR" \( -type f -o -type l \) 2>/dev/null | wc -l)
 log "Phase 8 complete: $FILE_COUNT files"
 
 log "Running Phase 9 (upload prep)..."
-python3 "$PIPELINE_DIR/pipeline_v2.py" --phase 9 >> "$PIPELINE_DIR/phase9_post_ai.log" 2>&1
+python3 "$PIPELINE_DIR/pipeline.py" --step 9 >> "$PIPELINE_DIR/phase9_post_ai.log" 2>&1
 python3 "$PIPELINE_DIR/google_photos_upload.py" >> "$PIPELINE_DIR/upload.log" 2>&1 || true
 
 log ""

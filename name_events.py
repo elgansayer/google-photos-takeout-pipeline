@@ -36,7 +36,7 @@ logging.basicConfig(
 )
 log = logging.getLogger('name_events')
 
-PIPELINE_DB = PIPELINE_DIR / 'pipeline_v2.db'
+PIPELINE_DB = PIPELINE_DIR / 'photos.db'
 OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
 TEXT_MODEL  = os.environ.get("TEXT_MODEL", "gemma3:4b")
 

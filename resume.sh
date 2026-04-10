@@ -22,7 +22,7 @@ IMMICH_MOUNT="${IMMICH_MOUNT:-}"
 OLD_FINAL_DIR="${OLD_FINAL_DIR:-}"
 
 PIPELINE_DIR="${PIPELINE_DIR}"
-DB="$PIPELINE_DIR/pipeline_v2.db"
+DB="$PIPELINE_DIR/photos.db"
 AI_LOG="$PIPELINE_DIR/ai_classify.log"
 
 log() { echo "[$(date '+%H:%M:%S')] $*"; }
@@ -50,7 +50,7 @@ elif kill -0 "$AI_PID" 2>/dev/null; then
 else
     run "Starting AI classify... ($AI_REMAINING images remaining)"
     cd "$PIPELINE_DIR"
-    nohup python3 pipeline_v2.py --phase 6 >> "$AI_LOG" 2>&1 &
+    nohup python3 pipeline.py --step 6 >> "$AI_LOG" 2>&1 &
     echo $! > "$PIPELINE_DIR/ai_classify.pid"
     ok "AI classify started (PID $!)"
 fi
@@ -77,7 +77,7 @@ if [[ "$FINAL_COUNT" -gt 0 ]]; then
 else
     run "Rebuilding output (Phase 8)..."
     cd "$PIPELINE_DIR"
-    python3 pipeline_v2.py --phase 8 >> "$PIPELINE_DIR/phase8.log" 2>&1
+    python3 pipeline.py --step 8 >> "$PIPELINE_DIR/phase8.log" 2>&1
     ok "Phase 8 done"
 fi
 

@@ -40,7 +40,7 @@ set -uo pipefail
 PIPELINE_DIR="${PIPELINE_DIR}"
 FINAL_DIR="${FINAL_DIR}"
 OLD_FINAL_DIR="${OLD_FINAL_DIR}"
-DB="$PIPELINE_DIR/pipeline_v2.db"
+DB="$PIPELINE_DIR/photos.db"
 LOG="$PIPELINE_DIR/orchestrator.log"
 PID_FILE="$PIPELINE_DIR/ai_classify.pid"
 PROGRESS_FILE="$PIPELINE_DIR/progress.json"
@@ -160,7 +160,7 @@ restart_ai_classify() {
 
     # Launch in background with nohup
     log "Launching AI classify in background..."
-    nohup python3 "$PIPELINE_DIR/pipeline_v2.py" --phase 6 \
+    nohup python3 "$PIPELINE_DIR/pipeline.py" --step 6 \
         >> "$PIPELINE_DIR/ai_classify.log" 2>&1 &
     local NEW_PID=$!
     echo "$NEW_PID" > "$PID_FILE"
@@ -202,7 +202,7 @@ regroup_albums() {
     if ! $DRY_RUN; then
         python3 - <<'EOF'
 import sqlite3, time
-db = "${PIPELINE_DIR}/pipeline_v2.db"
+db = "${PIPELINE_DIR}/photos.db"
 for attempt in range(30):
     try:
         conn = sqlite3.connect(db, timeout=120)
@@ -222,7 +222,7 @@ EOF
     fi
 
     log "Re-running Phase 7 (event clustering)..."
-    python3 "$PIPELINE_DIR/pipeline_v2.py" --phase 7 $DRY \
+    python3 "$PIPELINE_DIR/pipeline.py" --step 7 $DRY \
         >> "$PIPELINE_DIR/phase7.log" 2>&1 || { err "Phase 7 failed"; return 1; }
 
     local ALBUM_COUNT
@@ -269,7 +269,7 @@ organize_to_immich() {
     fi
     mkdir -p "$FINAL_DIR" 2>/dev/null || true
 
-    python3 "$PIPELINE_DIR/pipeline_v2.py" --phase 8 $DRY \
+    python3 "$PIPELINE_DIR/pipeline.py" --step 8 $DRY \
         >> "$PIPELINE_DIR/phase8.log" 2>&1 || { err "Phase 8 failed"; return 1; }
 
     local FILE_COUNT
@@ -286,7 +286,7 @@ upload_prep() {
     local DRY=""
     $DRY_RUN && DRY="--dry-run"
 
-    python3 "$PIPELINE_DIR/pipeline_v2.py" --phase 9 $DRY \
+    python3 "$PIPELINE_DIR/pipeline.py" --step 9 $DRY \
         >> "$PIPELINE_DIR/phase9.log" 2>&1 || true
 
     # Regenerate upload script pointing to new FINAL_DIR

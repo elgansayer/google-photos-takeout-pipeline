@@ -100,22 +100,24 @@ bash progress.sh
 watch -n 60 bash progress.sh
 ```
 
-### Run individual phases
+### Run individual steps
 
 ```bash
-python3 pipeline_v2.py --phase 1        # Audit & catalog
-python3 pipeline_v2.py --phase 2        # Merge JSON sidecars
-python3 pipeline_v2.py --phase 3        # Deduplicate
-python3 pipeline_v2.py --phase 4        # Fix directory names
-python3 pipeline_v2.py --phase 5        # Reverse geocode
-python3 pipeline_v2.py --phase 6        # AI classify (slow — runs in background)
-python3 pipeline_v2.py --phase 7        # Group into event albums
-python3 name_events.py                  # AI event naming (Phase 7.5)
-python3 pipeline_v2.py --phase 8        # Organise to output dir
-python3 pipeline_v2.py --phase 9        # Upload prep
+python3 pipeline.py --step scan           # Audit & catalog
+python3 pipeline.py --step merge-sidecars # Merge JSON sidecars
+python3 pipeline.py --step deduplicate    # Deduplicate
+python3 pipeline.py --step fix-dates      # Fix directory names
+python3 pipeline.py --step geocode        # Reverse geocode
+python3 pipeline.py --step classify       # AI classify (slow — runs in background)
+python3 pipeline.py --step group-albums   # Group into event albums
+python3 name_events.py                    # AI event naming (step 7.5)
+python3 pipeline.py --step export         # Organise to output dir
+python3 pipeline.py --step prep-upload    # Upload prep
 ```
 
-### Start from a specific phase
+Numeric shortcuts also work: `--step 1` through `--step 9`.
+
+### Start from a specific step
 
 ```bash
 bash master_pipeline.sh --from 7
@@ -124,7 +126,7 @@ bash master_pipeline.sh --from 7
 ### Dry run (no changes)
 
 ```bash
-python3 pipeline_v2.py --phase 1 --dry-run
+python3 pipeline.py --step scan --dry-run
 bash master_pipeline.sh --dry-run
 ```
 
@@ -132,19 +134,19 @@ bash master_pipeline.sh --dry-run
 
 ## Phase details
 
-| Phase | Script | Description | Duration |
-|-------|--------|-------------|----------|
-| 1 | `pipeline_v2.py` | Audit both source dirs, build SQLite catalogue | Minutes |
-| 2 | `pipeline_v2.py` | Merge Google JSON sidecars into photo metadata | Minutes |
-| 2.5 | `fix_dates.py` + `neighbor_date_fix.py` | Fix broken timestamps | Minutes |
-| 3 | `pipeline_v2.py` | Hash-based deduplication | Minutes |
-| 4 | `pipeline_v2.py` | Rename malformed timestamp directories | Minutes |
-| 5 | `pipeline_v2.py` | Offline reverse geocoding via GeoNames | Minutes–hours |
-| 6 | `pipeline_v2.py` | AI vision classification (runs in background) | **Days** |
-| 7 | `pipeline_v2.py` | Cluster photos into event albums by date/location | Minutes |
-| 7.5 | `name_events.py` | AI-generate descriptive event names | Minutes |
-| 8 | `pipeline_v2.py` | Organise into flat event-named folders (symlinks) | Minutes |
-| 9 | `pipeline_v2.py` + `google_photos_upload.py` | Generate rclone upload scripts | Seconds |
+| Step | Name | Script | Description | Duration |
+|------|------|--------|-------------|----------|
+| 1 | `scan` | `pipeline.py` | Audit both source dirs, build SQLite catalogue | Minutes |
+| 2 | `merge-sidecars` | `pipeline.py` | Merge Google JSON sidecars into photo metadata | Minutes |
+| 2.5 | — | `fix_dates.py` + `neighbor_date_fix.py` | Fix broken timestamps | Minutes |
+| 3 | `deduplicate` | `pipeline.py` | Hash-based deduplication | Minutes |
+| 4 | `fix-dates` | `pipeline.py` | Rename malformed timestamp directories | Minutes |
+| 5 | `geocode` | `pipeline.py` | Offline reverse geocoding via GeoNames | Minutes–hours |
+| 6 | `classify` | `pipeline.py` | AI vision classification (runs in background) | **Days** |
+| 7 | `group-albums` | `pipeline.py` | Cluster photos into event albums by date/location | Minutes |
+| 7.5 | — | `name_events.py` | AI-generate descriptive event names | Minutes |
+| 8 | `export` | `pipeline.py` | Organise into flat event-named folders (symlinks) | Minutes |
+| 9 | `prep-upload` | `pipeline.py` + `google_photos_upload.py` | Generate rclone upload scripts | Seconds |
 
 > **Phase 6 note:** AI classification is the longest phase (days for large libraries). It runs in the background and checkpoints after every 10 photos. The watcher script (`watch_ai_and_continue.sh`) monitors it, auto-restarts on crash, and triggers Phases 7–9 when complete.
 

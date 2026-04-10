@@ -11,21 +11,22 @@ Configure via environment variables (see .env.example):
   FINAL_DIR     — output directory for organized photos
   PIPELINE_DIR  — working directory for DB and logs (defaults to script dir)
 
-Phases:
-  1. Audit & catalog both dirs into unified SQLite DB
-  2. Merge 89K Google JSON sidecars into EXIF
-  3. Deduplicate (hash-based, ~100K expected dupes)
-  4. Fix broken timestamp directory names
-  5. Reverse geocode via GeoNames (offline)
-  6. AI classification via ollama llama3.2-vision
-  7. Auto-group into holiday/event albums (e.g. "Austria 2020")
-  8. Organize into final dir structure
-  9. Upload prep for Immich
+Steps (run in order):
+  scan            Catalogue all photos from source directories
+  merge-sidecars  Merge Google JSON metadata into photo records
+  deduplicate     Remove duplicate photos (hash-based)
+  fix-dates       Fix broken/missing timestamps
+  geocode         Reverse-geocode photos using GeoNames (offline)
+  classify        AI-tag every photo using a vision model (slow — runs in background)
+  group-albums    Cluster photos into event albums by date/location
+  export          Organise albums into flat event folders in output dir
+  prep-upload     Generate rclone upload scripts for Google Photos
 
 Usage:
-    python3 pipeline_v2.py --phase 1
-    python3 pipeline_v2.py --phase all
-    python3 pipeline_v2.py --phase 1 --dry-run
+    python3 pipeline.py --step scan
+    python3 pipeline.py --step classify
+    python3 pipeline.py --step all
+    python3 pipeline.py --step export --dry-run
 """
 
 import argparse
@@ -50,7 +51,7 @@ from pathlib import Path
 PRIMARY_DIR   = Path(os.environ.get("PRIMARY_DIR",   ""))   # Required: primary photo source dir
 SECONDARY_DIR = Path(os.environ.get("SECONDARY_DIR", ""))   # Optional: secondary source (leave empty if unused)
 PIPELINE_DIR  = Path(os.environ.get("PIPELINE_DIR",  str(Path(__file__).parent)))
-PIPELINE_DB   = PIPELINE_DIR / "pipeline_v2.db"
+PIPELINE_DB   = PIPELINE_DIR / "photos.db"
 GEONAMES_FILE = Path(os.environ.get("GEONAMES_FILE", str(PIPELINE_DIR / "allCountries.txt")))
 FINAL_DIR     = Path(os.environ.get("FINAL_DIR",     ""))   # Required: output directory
 
@@ -73,11 +74,11 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s [%(levelname)s] %(message)s',
     handlers=[
-        logging.FileHandler(PIPELINE_DIR / "pipeline_v2.log"),
+        logging.FileHandler(PIPELINE_DIR / "pipeline.log"),
         logging.StreamHandler()
     ]
 )
-log = logging.getLogger("pipeline_v2")
+log = logging.getLogger("pipeline")
 
 
 # ============================================================
@@ -195,7 +196,7 @@ def get_db():
 # Phase 1: Unified Audit
 # ============================================================
 
-def phase1_audit(dry_run=False):
+def scan(dry_run=False):
     """Catalog ALL files from both directories."""
     log.info("=== PHASE 1: Unified Audit of Both Directories ===")
     conn = init_db()
@@ -284,12 +285,12 @@ def phase1_audit(dry_run=False):
 
     # Step 2: Walk PRIMARY directory for everything DigiKam missed
     log.info("Step 2: Scanning primary directory (external drive, 422K files)...")
-    new_primary = _scan_directory(PRIMARY_DIR, 'primary', cursor, conn)
+    new_primary = _index_directory(PRIMARY_DIR, 'primary', cursor, conn)
     log.info(f"Primary scan: {new_primary} new files")
 
     # Step 3: Walk SECONDARY for any unique files
     log.info("Step 3: Scanning secondary directory (internal drive)...")
-    new_secondary = _scan_directory(SECONDARY_DIR, 'secondary', cursor, conn)
+    new_secondary = _index_directory(SECONDARY_DIR, 'secondary', cursor, conn)
     log.info(f"Secondary scan: {new_secondary} new files")
 
     # Step 4: Match JSON sidecars (the big win — 89K on external)
@@ -369,7 +370,7 @@ def phase1_audit(dry_run=False):
     conn.close()
 
 
-def _scan_directory(base_dir, source_label, cursor, conn):
+def _index_directory(base_dir, source_label, cursor, conn):
     """Walk a directory and add uncatalogued media files to DB."""
     new_count = 0
     batch = []
@@ -417,7 +418,7 @@ def _scan_directory(base_dir, source_label, cursor, conn):
 # Phase 2: Merge JSON Metadata into EXIF
 # ============================================================
 
-def phase2_merge_json(dry_run=False):
+def merge_sidecars(dry_run=False):
     """Read Google JSON sidecars and write metadata into EXIF."""
     log.info("=== PHASE 2: Merge 89K JSON Sidecars into EXIF ===")
     conn = get_db()
@@ -542,7 +543,7 @@ def phase2_merge_json(dry_run=False):
 # Phase 3: Deduplicate
 # ============================================================
 
-def phase3_deduplicate(dry_run=False):
+def deduplicate(dry_run=False):
     """Hash-based dedup across both sources. Also compute hashes for unhashed files."""
     log.info("=== PHASE 3: Deduplicate ===")
     conn = get_db()
@@ -592,7 +593,7 @@ def phase3_deduplicate(dry_run=False):
             f"SELECT * FROM photos WHERE id IN ({','.join('?' * len(ids))})", ids
         ).fetchall()
 
-        canonical = _pick_canonical(photos)
+        canonical = _select_best_copy(photos)
         for photo in photos:
             if photo['id'] != canonical['id']:
                 cursor.execute("""
@@ -625,7 +626,7 @@ def phase3_deduplicate(dry_run=False):
         photos = cursor.execute(
             f"SELECT * FROM photos WHERE id IN ({','.join('?' * len(ids))})", ids
         ).fetchall()
-        canonical = _pick_canonical(photos)
+        canonical = _select_best_copy(photos)
         for photo in photos:
             if photo['id'] != canonical['id']:
                 cursor.execute("""
@@ -670,7 +671,7 @@ def _file_hash(path, chunk_size=65536):
     return h.hexdigest()
 
 
-def _pick_canonical(photos):
+def _select_best_copy(photos):
     """Pick best copy: prefer primary with JSON sidecar > named album > most metadata."""
     def score(p):
         s = 0
@@ -700,7 +701,7 @@ def _pick_canonical(photos):
 # Phase 4: Fix Broken Directory Names
 # ============================================================
 
-def phase4_fix_dirs(dry_run=False):
+def fix_dates(dry_run=False):
     """Fix broken timestamp directory names on PRIMARY (external) drive."""
     log.info("=== PHASE 4: Fix Broken Directory Names ===")
     conn = get_db()
@@ -846,7 +847,7 @@ COUNTRY_CODES = {
 }
 
 
-def phase5_geocode(dry_run=False):
+def geocode(dry_run=False):
     """Reverse geocode photos with GPS but no location names."""
     log.info("=== PHASE 5: Reverse Geocoding ===")
     conn = get_db()
@@ -898,7 +899,7 @@ def phase5_geocode(dry_run=False):
 # Phase 6: AI Classification
 # ============================================================
 
-def _resize_image_for_ai(fpath):
+def _prepare_image(fpath):
     """Load and resize image to max 1024px, return base64 JPEG. Returns None on failure."""
     import base64, io
     from PIL import Image as PILImage
@@ -935,7 +936,7 @@ def _resize_image_for_ai(fpath):
         return None
 
 
-def phase6_ai_classify(dry_run=False, max_items=None):
+def classify(dry_run=False, max_items=None):
     """Classify photos using ollama llama3.2-vision with concurrent workers."""
     log.info("=== PHASE 6: AI Classification ===")
     import requests
@@ -978,7 +979,7 @@ def phase6_ai_classify(dry_run=False, max_items=None):
         if not os.path.exists(fpath):
             return (row['id'], None, True)
 
-        img_b64 = _resize_image_for_ai(fpath)
+        img_b64 = _prepare_image(fpath)
         if img_b64 is None:
             return (row['id'], None, False)
 
@@ -999,7 +1000,7 @@ def phase6_ai_classify(dry_run=False, max_items=None):
                 "stream": False, "options": {"temperature": 0.1, "num_predict": 300}
             }, timeout=120)
             resp.raise_for_status()
-            ai_data = _parse_json_response(resp.json().get('response', ''))
+            ai_data = _extract_json(resp.json().get('response', ''))
             return (row['id'], ai_data, False)
         except Exception as e:
             log.debug(f"classify_one failed for {fpath}: {e}")
@@ -1058,7 +1059,7 @@ def phase6_ai_classify(dry_run=False, max_items=None):
     conn.close()
 
 
-def _parse_json_response(text):
+def _extract_json(text):
     text = text.strip()
     if text.startswith('```'):
         text = re.sub(r'^```\w*\n?', '', text)
@@ -1083,7 +1084,7 @@ def _parse_json_response(text):
 # Phase 7: Auto-group into Albums
 # ============================================================
 
-def phase7_group_albums(dry_run=False):
+def group_albums(dry_run=False):
     """Group photos into holiday/event albums: 'Austria 2020', 'Japan 2024', etc."""
     log.info("=== PHASE 7: Auto-group into Albums ===")
     conn = get_db()
@@ -1178,7 +1179,7 @@ def phase7_group_albums(dry_run=False):
     # Step 3: Name and create albums
     created = 0
     for cluster in clusters:
-        name = _gen_album_name(cluster)
+        name = _build_album_name(cluster)
         if not name:
             continue
 
@@ -1240,7 +1241,7 @@ def phase7_group_albums(dry_run=False):
     conn.close()
 
 
-def _gen_album_name(cluster):
+def _build_album_name(cluster):
     """Generate album name like 'Austria 2020' or 'Japan 2024 (14 days)'."""
     countries = [p['country'] for p in cluster if p['country']]
     cities = [p['city'] for p in cluster if p['city']]
@@ -1287,7 +1288,7 @@ def _gen_album_name(cluster):
 # Phase 8: Organize into Final Directory
 # ============================================================
 
-def phase8_reorganize(dry_run=False):
+def export_albums(dry_run=False):
     """Organize unique photos into flat Event Album Name/ dirs at the final output dir."""
     log.info(f"=== PHASE 8: Organize into {FINAL_DIR} ===")
     conn = get_db()
@@ -1328,9 +1329,9 @@ def phase8_reorganize(dry_run=False):
         dest_dir = FINAL_DIR / album
         if not dry_run:
             dest_dir.mkdir(parents=True, exist_ok=True)
-        dest = _unique_dest(dest_dir, photo['filename'])
+        dest = _unique_path(dest_dir, photo['filename'])
         if not dry_run:
-            _link_or_symlink(photo['file_path'], str(dest))
+            _create_link(photo['file_path'], str(dest))
         moved += 1
         if moved % 5000 == 0:
             log.info(f"  Organized {moved}...")
@@ -1348,9 +1349,9 @@ def phase8_reorganize(dry_run=False):
         dest_dir = FINAL_DIR / f'Unsorted {year}'
         if not dry_run:
             dest_dir.mkdir(parents=True, exist_ok=True)
-        dest = _unique_dest(dest_dir, photo['filename'])
+        dest = _unique_path(dest_dir, photo['filename'])
         if not dry_run:
-            _link_or_symlink(photo['file_path'], str(dest))
+            _create_link(photo['file_path'], str(dest))
         moved += 1
 
     log.info(f"Phase 8 complete: organized {moved} files into {FINAL_DIR}")
@@ -1366,7 +1367,7 @@ def _extract_year(date_str):
     return 'Undated'
 
 
-def _link_or_symlink(src, dst):
+def _create_link(src, dst):
     """Hardlink if same filesystem, symlink if cross-filesystem, copy as last resort."""
     try:
         os.link(src, dst)
@@ -1377,7 +1378,7 @@ def _link_or_symlink(src, dst):
             shutil.copy2(src, dst)
 
 
-def _unique_dest(dest_dir, filename):
+def _unique_path(dest_dir, filename):
     dest = dest_dir / filename
     if not dest.exists() and not dest.is_symlink():
         return dest
@@ -1393,7 +1394,7 @@ def _unique_dest(dest_dir, filename):
 # Phase 9: Upload Prep
 # ============================================================
 
-def phase9_upload_prep(dry_run=False):
+def prep_upload(dry_run=False):
     log.info("=== PHASE 9: Upload Preparation ===")
     conn = get_db()
     cursor = conn.cursor()
@@ -1452,10 +1453,35 @@ def phase9_upload_prep(dry_run=False):
 # ============================================================
 
 def main():
-    parser = argparse.ArgumentParser(description='Unified Photo Pipeline v2')
-    parser.add_argument('--phase', required=True, help='1-9 or "all"')
-    parser.add_argument('--dry-run', action='store_true')
-    parser.add_argument('--max-items', type=int, default=None)
+    parser = argparse.ArgumentParser(
+        description='Google Photos Takeout Organiser',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Steps (run in order):
+  scan            Catalogue all photos from source directories
+  merge-sidecars  Merge Google JSON metadata into photo records
+  deduplicate     Remove duplicate photos (hash-based)
+  fix-dates       Fix broken/missing timestamps
+  geocode         Reverse-geocode photos using GeoNames
+  classify        AI-tag every photo using a vision model (slow)
+  group-albums    Cluster photos into event albums
+  export          Organise albums into the output directory
+  prep-upload     Generate rclone upload scripts
+  all             Run all steps in order
+
+Examples:
+  python3 pipeline.py --step scan
+  python3 pipeline.py --step classify --max-items 100
+  python3 pipeline.py --step all --dry-run
+        """
+    )
+    parser.add_argument(
+        '--step', required=True,
+        metavar='STEP',
+        help='Step name (e.g. scan, classify, export) or "all"'
+    )
+    parser.add_argument('--dry-run', action='store_true', help='Preview changes without writing anything')
+    parser.add_argument('--max-items', type=int, default=None, help='Limit items processed (useful for testing)')
     args = parser.parse_args()
 
     # Validate required configuration
@@ -1474,26 +1500,34 @@ def main():
 
     PIPELINE_DIR.mkdir(parents=True, exist_ok=True)
 
-    phases = {
-        '1': phase1_audit,
-        '2': phase2_merge_json,
-        '3': phase3_deduplicate,
-        '4': phase4_fix_dirs,
-        '5': phase5_geocode,
-        '6': lambda dr: phase6_ai_classify(dr, max_items=args.max_items),
-        '7': phase7_group_albums,
-        '8': phase8_reorganize,
-        '9': phase9_upload_prep,
+    # Named steps — also accept legacy numeric aliases (1-9)
+    steps = {
+        'scan':           scan,
+        'merge-sidecars': merge_sidecars,
+        'deduplicate':    deduplicate,
+        'fix-dates':      fix_dates,
+        'geocode':        geocode,
+        'classify':       lambda dr: classify(dr, max_items=args.max_items),
+        'group-albums':   group_albums,
+        'export':         export_albums,
+        'prep-upload':    prep_upload,
+    }
+    numeric_aliases = {
+        '1': 'scan', '2': 'merge-sidecars', '3': 'deduplicate',
+        '4': 'fix-dates', '5': 'geocode', '6': 'classify',
+        '7': 'group-albums', '8': 'export', '9': 'prep-upload',
     }
 
-    if args.phase == 'all':
-        for n in sorted(phases.keys()):
-            log.info(f"\n{'='*60}\nPhase {n}\n{'='*60}")
-            phases[n](args.dry_run)
-    elif args.phase in phases:
-        phases[args.phase](args.dry_run)
+    step = numeric_aliases.get(args.step, args.step)
+
+    if step == 'all':
+        for name, fn in steps.items():
+            log.info(f"\n{'='*60}\n{name}\n{'='*60}")
+            fn(args.dry_run)
+    elif step in steps:
+        steps[step](args.dry_run)
     else:
-        print(f"Unknown phase: {args.phase}")
+        print(f"Unknown step: {args.step!r}\nRun with --help to see available steps.")
         sys.exit(1)
 
 

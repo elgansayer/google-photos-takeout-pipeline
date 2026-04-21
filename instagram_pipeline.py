@@ -60,9 +60,9 @@ except ImportError:
     _USE_REQUESTS = False
 
 # ── Config ─────────────────────────────────────────────────────────────────────
-FINAL_DIR     = Path(os.environ.get("FINAL_DIR",     "/run/media/elgan/immich1/final-google-photos"))
+FINAL_DIR     = Path(os.environ.get("FINAL_DIR",     "/run/media/elgan/immich/final-google-photos"))
 INSTAGRAM_DIR = Path(os.environ.get("INSTAGRAM_DIR", str(Path(__file__).parent / "instagram_ready")))
-PIPELINE_DB   = Path(os.environ.get("PIPELINE_DB",   "/run/media/elgan/extra/Pictures/photo_pipeline/pipeline_v2.db"))
+PIPELINE_DB   = Path(os.environ.get("PIPELINE_DB",   "/run/media/elgan/evo/Pictures/photo_pipeline/pipeline_v2.db"))
 INSTAGRAM_DB  = Path(os.environ.get("INSTAGRAM_DB",  str(Path(__file__).parent / "instagram.db")))
 VISION_MODEL  = os.environ.get("VISION_MODEL",  "llama3.2-vision:latest")
 OLLAMA_URL    = os.environ.get("OLLAMA_URL",    "http://localhost:11434")

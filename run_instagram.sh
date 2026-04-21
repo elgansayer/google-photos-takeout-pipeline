@@ -30,4 +30,10 @@ if ! mountpoint -q "${EVO_MOUNT:-/run/media/elgan/evo}" 2>/dev/null; then
     exit 1
 fi
 
-exec python3 "$SCRIPT_DIR/instagram_pipeline.py" "$@"
+python3 "$SCRIPT_DIR/instagram_pipeline.py" "$@" &
+INST_PID=$!
+echo "$INST_PID" > "$SCRIPT_DIR/instagram_pipeline.pid"
+wait "$INST_PID"
+EXIT=$?
+rm -f "$SCRIPT_DIR/instagram_pipeline.pid"
+exit $EXIT

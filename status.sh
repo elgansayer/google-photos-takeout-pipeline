@@ -1,7 +1,17 @@
-#!/bin/bash
-# Pipeline status dashboard
-DB="${PIPELINE_DIR}/photos.db"
-PIPELINE_DIR="${PIPELINE_DIR}"
+#!/usr/bin/env bash
+# status.sh — Photo pipeline status dashboard.
+#
+# Usage:  bash status.sh
+#         watch -n 30 bash status.sh
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -f "$SCRIPT_DIR/.env" ]; then set -a; source "$SCRIPT_DIR/.env"; set +a; fi
+
+PIPELINE_DIR="${PIPELINE_DIR:-$SCRIPT_DIR}"
+FINAL_DIR="${FINAL_DIR:-}"
+EVO_MOUNT="${EVO_MOUNT:-/run/media/elgan/evo}"
+IMMICH_MOUNT="${IMMICH_MOUNT:-/run/media/elgan/immich}"
+DB="$PIPELINE_DIR/photos.db"
 
 echo "╔══════════════════════════════════════════════════════════════╗"
 echo "║             PHOTO PIPELINE STATUS DASHBOARD                  ║"
@@ -10,14 +20,14 @@ echo ""
 
 # Disk space
 echo "── DISK SPACE ────────────────────────────────────────────────"
-df -h ${EVO_MOUNT}/ ${IMMICH_MOUNT}/ / 2>/dev/null | awk 'NR>1 {printf "  %-40s %5s used  %5s free  %s\n", $6, $3, $4, $5}'
+df -h "$EVO_MOUNT/" "$IMMICH_MOUNT/" / 2>/dev/null | awk 'NR>1 {printf "  %-40s %5s used  %5s free  %s\n", $6, $3, $4, $5}'
 echo ""
 
-# DB stats
+# DB stats — pass FINAL_DIR as argument so it's visible inside the heredoc
 echo "── PHOTO DATABASE ────────────────────────────────────────────"
-python3 - "$DB" << 'PYEOF'
+python3 - "$DB" "$FINAL_DIR" "$PIPELINE_DIR" << 'PYEOF'
 import sqlite3, sys, os
-db = sys.argv[1]
+db, final_dir, pipeline_dir = sys.argv[1], sys.argv[2], sys.argv[3]
 try:
     c = sqlite3.connect(db, timeout=10).cursor()
     r = c.execute("""
@@ -33,18 +43,17 @@ try:
           SUM(CASE WHEN album_id IS NOT NULL AND is_duplicate=0 THEN 1 ELSE 0 END) in_album
         FROM photos
     """).fetchone()
-    total, dupes, uniq, json_m, gdates, gps, geo, ai, albums = r
+    total, dupes, uniq, json_m, gdates, gps, geo, ai, in_alb = r
     total = total or 0; dupes = dupes or 0; uniq = uniq or 0
+    sidecars = c.execute("SELECT COUNT(*) FROM photos WHERE has_json_sidecar=1").fetchone()[0]
     print(f"  Total files:      {total:>7,}")
     print(f"  Unique photos:    {uniq:>7,}  ({dupes:,} duplicates removed)")
-    print(f"  JSON merged:      {json_m:>7,} / {c.execute('SELECT COUNT(*) FROM photos WHERE has_json_sidecar=1').fetchone()[0]:,} sidecars")
+    print(f"  JSON merged:      {json_m:>7,} / {sidecars:,} sidecars")
     print(f"  Good dates:       {gdates:>7,} / {total:,}")
     print(f"  Has GPS:          {gps:>7,} / {total:,}")
     print(f"  Geocoded:         {geo:>7,} / {uniq:,}")
     print(f"  AI classified:    {ai:>7,} / {uniq:,}")
-    print(f"  In albums:        {albums:>7,} / {uniq:,}")
-    # Count organized output files
-    final_dir = "${OLD_FINAL_DIR}"
+    print(f"  In albums:        {in_alb:>7,} / {uniq:,}")
     org_count = sum(len(files) for _, _, files in os.walk(final_dir)) if os.path.exists(final_dir) else 0
     print(f"  Organized files:  {org_count:>7,}  (in final-google-photos)")
     albums_count = c.execute("SELECT COUNT(*) FROM albums WHERE source='auto'").fetchone()[0]
@@ -54,46 +63,41 @@ except Exception as e:
 PYEOF
 echo ""
 
-# Phase status — derive from DB state + log
+# Phase status
 echo "── PHASE STATUS ──────────────────────────────────────────────"
-python3 - "$DB" "$PIPELINE_DIR/orchestrator.log" << 'PYEOF'
-import sqlite3, sys, re, os
-db, logfile = sys.argv[1], sys.argv[2]
+python3 - "$DB" "$PIPELINE_DIR/orchestrator.log" "$FINAL_DIR" "$PIPELINE_DIR" << 'PYEOF'
+import sqlite3, sys, re, os, subprocess
+db, logfile, final_dir, pipeline_dir = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
 
 phases = {
-    "1":   "Audit both directories",
+    "1":   "Scan source directories",
     "2":   "Merge JSON sidecars",
     "2.5": "Fix bad/missing dates",
     "3":   "Deduplicate",
-    "4":   "Fix broken dir names",
-    "5":   "Reverse geocode",
-    "6":   "AI classify (background ~80h)",
+    "4":   "Reverse geocode",
+    "4.5": "Guess locations (GPS inference)",
+    "6":   "AI classify (background)",
     "7":   "Group into event albums",
-    "7.5": "Rename albums with AI",
-    "8":   "Organize to final dir",
+    "7.5": "AI event naming",
+    "8":   "Export to final directory",
     "9":   "Upload prep",
 }
 
-# Determine phase state from DB
 try:
     c = sqlite3.connect(db, timeout=10).cursor()
-    total = c.execute("SELECT COUNT(*) FROM photos").fetchone()[0]
+    total     = c.execute("SELECT COUNT(*) FROM photos").fetchone()[0]
     json_done = c.execute("SELECT COUNT(*) FROM photos WHERE json_merged=1").fetchone()[0]
-    dupes = c.execute("SELECT COUNT(*) FROM photos WHERE is_duplicate=1").fetchone()[0]
-    geocoded = c.execute("SELECT COUNT(*) FROM photos WHERE country IS NOT NULL").fetchone()[0]
-    ai_done = c.execute("SELECT COUNT(*) FROM photos WHERE ai_processed=1").fetchone()[0]
-    in_album = c.execute("SELECT COUNT(*) FROM photos WHERE album_id IS NOT NULL AND is_duplicate=0").fetchone()[0]
-    uniq = total - dupes
+    dupes     = c.execute("SELECT COUNT(*) FROM photos WHERE is_duplicate=1").fetchone()[0]
+    geocoded  = c.execute("SELECT COUNT(*) FROM photos WHERE country IS NOT NULL").fetchone()[0]
+    ai_done   = c.execute("SELECT COUNT(*) FROM photos WHERE ai_processed=1").fetchone()[0]
+    in_album  = c.execute("SELECT COUNT(*) FROM photos WHERE album_id IS NOT NULL AND is_duplicate=0").fetchone()[0]
 except:
-    total = json_done = dupes = geocoded = ai_done = in_album = uniq = 0
+    total = json_done = dupes = geocoded = ai_done = in_album = 0
 
-final_dir = "${OLD_FINAL_DIR}"
 org_count = sum(len(files) for _, _, files in os.walk(final_dir)) if os.path.exists(final_dir) else 0
-manifest = os.path.exists("${PIPELINE_DIR}/upload_manifest.json")
+manifest  = os.path.exists(os.path.join(pipeline_dir, "upload_manifest.json"))
 
-# Parse log for completed/failed
-completed = set()
-failed = set()
+completed, failed = set(), set()
 if os.path.exists(logfile):
     with open(logfile) as f:
         for line in f:
@@ -101,56 +105,42 @@ if os.path.exists(logfile):
             if m: completed.add(m.group(1))
             m = re.search(r'FATAL: Phase ([\d.]+) failed', line)
             if m: failed.add(m.group(1))
-    # If a phase later succeeded, remove from failed
     for k in list(failed):
         if k in completed: failed.discard(k)
 
-# Override with DB state where possible
-if total > 0: completed.add("1")
+if total     > 0:   completed.add("1")
 if json_done > 100: completed.add("2")
-if dupes > 0: completed.add("3")
-if geocoded > 0: completed.add("5")
-if ai_done > 0: completed.add("6")
-if in_album > 0: completed.add("7")
-if org_count > 0: completed.add("8")
-if manifest: completed.add("9")
+if dupes     > 0:   completed.add("3")
+if geocoded  > 0:   completed.add("4")
+if ai_done   > 0:   completed.add("6")
+if in_album  > 0:   completed.add("7")
+if org_count > 0:   completed.add("8")
+if manifest:        completed.add("9")
 
-# Running processes
 running = set()
-import subprocess
 try:
-    out = subprocess.check_output(['pgrep', '-fa', 'pipeline.py|fix_dates|name_events'], text=True)
+    out = subprocess.check_output(['pgrep', '-fa', 'pipeline.py|fix_dates|name_events|guess_locations'], text=True)
     for line in out.splitlines():
-        for p in ["--step 2", "--step 3", "--step 4", "--step 5", "--step 6",
-                  "--step 7", "--step 8", "--step 9", "fix_dates", "name_events"]:
-            if p in line:
-                if "fix_dates" in line: running.add("2.5")
-                elif "name_events" in line: running.add("7.5")
-                else:
-                    m = re.search(r'--step (\S+)', line)
-                    if m: running.add(m.group(1))
+        if 'fix_dates'     in line: running.add("2.5")
+        elif 'name_events' in line: running.add("7.5")
+        elif 'guess_loc'   in line: running.add("4.5")
+        else:
+            m = re.search(r'--step (\S+)', line)
+            if m: running.add(m.group(1))
 except: pass
 
 for num, name in phases.items():
-    if num in running:
-        icon = "⟳"
-        suffix = " [RUNNING]"
-    elif num in completed:
-        icon = "✓"
-        suffix = ""
-    elif num in failed:
-        icon = "✗"
-        suffix = " [FAILED]"
-    else:
-        icon = "·"
-        suffix = ""
+    if   num in running:   icon, suffix = "⟳", " [RUNNING]"
+    elif num in completed: icon, suffix = "✓", ""
+    elif num in failed:    icon, suffix = "✗", " [FAILED]"
+    else:                  icon, suffix = "·", ""
     print(f"  {icon} Phase {num:<4} {name}{suffix}")
 PYEOF
 echo ""
 
 # Running processes
 echo "── RUNNING PROCESSES ─────────────────────────────────────────"
-PROCS=$(pgrep -fa "pipeline.py|fix_dates|name_events|continue_after" 2>/dev/null)
+PROCS=$(pgrep -fa "pipeline.py|fix_dates|name_events|instagram_pipeline|guess_locations" 2>/dev/null || true)
 if [[ -z "$PROCS" ]]; then
     echo "  (no pipeline processes running)"
 else
@@ -159,11 +149,11 @@ fi
 echo ""
 
 # Recent log
-echo "── RECENT LOG (last 6 lines) ─────────────────────────────────"
+echo "── RECENT LOG ────────────────────────────────────────────────"
 if [[ -f "$PIPELINE_DIR/orchestrator.log" ]]; then
-    tail -6 "$PIPELINE_DIR/orchestrator.log" | grep -v "^$" | sed 's/^/  /'
+    tail -5 "$PIPELINE_DIR/orchestrator.log" | grep -v "^$" | sed 's/^/  /'
 fi
 echo ""
-echo "  Monitor live:    tail -f $PIPELINE_DIR/orchestrator.log"
-echo "  Monitor AI:      tail -f $PIPELINE_DIR/ai_classify.log"
-echo "  Resume pipeline: bash $PIPELINE_DIR/run_pipeline.sh --from N"
+echo "  Live log:   tail -f $PIPELINE_DIR/orchestrator.log"
+echo "  Resume:     bash run_pipeline.sh --from N"
+echo "  Instagram:  bash run_instagram.sh --step summary"

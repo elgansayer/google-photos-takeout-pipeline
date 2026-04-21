@@ -200,9 +200,9 @@ regroup_albums() {
     # Clear auto-generated albums to re-cluster with improved dates + AI data
     log "Clearing auto-generated albums (keeping existing Google albums)..."
     if ! $DRY_RUN; then
-        python3 - <<'EOF'
-import sqlite3, time
-db = "${PIPELINE_DIR}/photos.db"
+        python3 - "$DB" <<'EOF'
+import sqlite3, sys, time
+db = sys.argv[1]
 for attempt in range(30):
     try:
         conn = sqlite3.connect(db, timeout=120)
